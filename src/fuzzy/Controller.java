@@ -6,10 +6,11 @@ public abstract class Controller implements Runnable {
 
 	protected boolean run = true;		// Run flag, if set to false the thread will quit
 	protected String controllerName;	// Name of controller. Must be set for logging
+	protected long startTime = System.currentTimeMillis();
 	
 	protected int pollingRate;			// Seconds between polls
-	protected int currentSignal = 0;	// Current controller signal
-	protected int lastSignal = 0;		// Previous controller signal
+	protected double currentSignal = 0;	// Current controller signal
+	protected double lastSignal = 0;		// Previous controller signal
 
 	protected DecimalFormat df = new DecimalFormat("#.####");	// Format for double output
 	enum NotificationType {
@@ -54,7 +55,7 @@ public abstract class Controller implements Runnable {
 	 * 
 	 * @return currentSignal the current controller signal
 	 */
-	public int getCurrentSignal() {
+	public double getCurrentSignal() {
 		return this.currentSignal;
 	}
 	
@@ -87,9 +88,37 @@ public abstract class Controller implements Runnable {
 		} else if(type == NotificationType.NOTIFY) {
 			prefix = "@@  ";
 		} else {
-			prefix = ">>";
-		}
-		System.out.println(prefix + " |" + this.controllerName + "| " + s);			
+			prefix = ">>  ";
+		}	
+		System.out.println(prefix + " " + getRunningTimeString() + " |" + 
+				this.controllerName + "| " + s);			
+	}
+	
+	/**
+	 * Calculates running time of process and returns a string in format of
+	 * HH:MM:SS.
+	 * 
+	 * @return run time string formatted to HH:MM:SS
+	 */
+	public String getRunningTimeString() {
+		long systimeSeconds = (System.currentTimeMillis() - startTime) / 1000;
+		int hr = (int) (systimeSeconds / 3600);
+		int rem = (int) (systimeSeconds % 3600);
+		int mn = rem / 60;
+		int sec = rem % 60;
+		String hrStr = (hr < 10 ? "0" : "") + hr;
+		String mnStr = (mn < 10 ? "0" : "") + mn;
+		String secStr = (sec < 10 ? "0" : "") + sec;
+		return hrStr + ":" + mnStr + ":" + secStr;
+	}
+	
+	/**
+	 * Return raw running time of process in milliseconds.
+	 * 
+	 * @return run time in raw Long format
+	 */
+	public Long getRunningTimeLong() {
+		return (System.currentTimeMillis() - startTime);
 	}
 	
 	/**
