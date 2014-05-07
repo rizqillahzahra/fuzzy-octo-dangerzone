@@ -9,8 +9,8 @@ public class FuzzyThermostat extends Controller {
 	private ACUnit system = null;
 	private Sensor sensor;
 	
-	private double errThresh = this.pollingRate * .05;
-	private double rocThresh = this.pollingRate * .0015;
+	private double errThreshMult = .1;			// Translates to 1 degree F
+	private double momentumThreshMult = .2;	// Translates to 2 degrees F
 	
 	/**
 	 * Default constructor for FuzzyController.
@@ -26,24 +26,31 @@ public class FuzzyThermostat extends Controller {
 		this.sensor = sensor;
 	}
 	
-	public void process() throws InterruptedException {		
-		if(this.prevTemp != 0)
+	/**
+	 * Main method of thread. This is implemented from parent interface
+	 * Controller. Does an active check of current output and changes in the
+	 * system and may set a new control signal.
+	 */
+	public void process() throws InterruptedException {
+		if(this.prevTemp != 0) {
 			Thread.sleep(this.pollingRate * 1000);
+		}
 		
-		int signal = calculateOutput();
+		double signal = calculateOutput();
 		this.log("CUR-T: " + this.df.format(this.currentTemp) + 
 				"    PR-T: " + this.df.format(this.prevTemp) + 
 				"    AVG-T: " + this.df.format(this.avgTemp) +
-				"    ERR THRESH: " + this.df.format(this.errThresh) +
-				"    ERRDOT THRESH: " + this.df.format(this.rocThresh) + "\n" +
-				"   Temperature changed by: " + this.df.format(this.currentTemp - this.prevTemp));
+				"    ERR T/M: " + this.df.format(this.errThreshMult * this.pollingRate) + "/" + this.df.format(this.errThreshMult) +
+				"    ERRDOT T/M: " + this.df.format(this.momentumThreshMult * this.pollingRate) + "/" + this.df.format(this.momentumThreshMult) +
+				"\n     -- Temperature changed by: " + this.df.format(this.currentTemp - this.prevTemp) + 
+				"\n     -- Err: " + getTempChange() + "    Momentum: " + getTempChangeMomentum());
 		
 		// Skip if no change in system
 		if(signal == this.lastSignal) {
 			return;
 		}
 
-		this.log("signal changed to " + Integer.toString(signal), NotificationType.NOTIFY);
+		this.log("signal changed to " + this.df.format(signal), NotificationType.NOTIFY);
 		this.system.setSignal(signal);
 		this.lastSignal = this.currentSignal;
 		this.currentSignal = signal;
@@ -58,15 +65,17 @@ public class FuzzyThermostat extends Controller {
 	 * will be needed. This has to do with the rule-based structure.
 	 * TODO: Make rules import-able from external file (.dat or Java structure)
 	 * 
-	 * -5 - high cool
-	 * -3 - cool
-	 * 0  - no change
-	 * +3 - heat
-	 * +5 - high heat
+	 * -5 	- high cool
+	 * -3 	- med cool
+	 * -1.5 - low cool
+	 * 0  	- no change
+	 * +1.5 - low heat
+	 * +3 	- med heat
+	 * +5 	- high heat
 	 * 
 	 * @return change control signal of change in system (values above)
 	 */
-	public int calculateOutput() {
+	public double calculateOutput() {
 		updateThermostat();	// Take reading of system
 		
 		String change = getTempChange();
@@ -78,13 +87,13 @@ public class FuzzyThermostat extends Controller {
 			return -5;
 		} else if(change.matches("POS") && changeMomentum.matches("NEG")) {
 			// Its hot but cooling down
-			return -3;
+			return -1.5;
 		} else if(change.matches("POS") && changeMomentum.matches("NC")) {
 			// Its hot but not changing
 			return -3;
 		} else if(change.matches("NEG") && changeMomentum.matches("POS")) {
 			// Its cold but warming up
-			return 3;
+			return 1.5;
 		} else if(change.matches("NEG") && changeMomentum.matches("NC")) {
 			// Its cold but not changing
 			return 3;
@@ -96,10 +105,10 @@ public class FuzzyThermostat extends Controller {
 			return 0;
 		} else if(change.matches("NC") && changeMomentum.matches("NEG")) {
 			// It feels good but getting colder
-			return 3;			
+			return 0;
 		} else if(change.matches("NC") && changeMomentum.matches("POS")) {
 			// It feels good but getting hotter
-			return -3;			
+			return 0;
 		}
 		return 0;
 	}
@@ -116,10 +125,11 @@ public class FuzzyThermostat extends Controller {
 	 * @return
 	 */
 	private String getTempChange() {
-		double err = this.targetTemp - this.currentTemp;		
-		if(err > this.errThresh) {
+		double err = this.targetTemp - this.currentTemp;
+		double thresh = (this.errThreshMult * this.pollingRate);
+		if(err > thresh) {
 			return "NEG";
-		} else if (err < -this.errThresh) {
+		} else if (err < -thresh) {
 			return "POS";
 		}
 		return "NC";
@@ -143,9 +153,10 @@ public class FuzzyThermostat extends Controller {
 		// polling time
 		double tempChange = this.currentTemp - this.avgTemp;
 		double rateOfChange = tempChange / this.pollingRate;
-		if(rateOfChange > this.rocThresh) {
+		double thresh = (this.momentumThreshMult * this.pollingRate);
+		if(rateOfChange > thresh) {
 			return "NEG";
-		} else if (rateOfChange < -this.rocThresh) {
+		} else if (rateOfChange < -thresh) {
 			return "POS";
 		} 		
 		return "NC";
@@ -162,7 +173,11 @@ public class FuzzyThermostat extends Controller {
 		} else {
 			this.prevTemp = this.currentTemp;
 			this.currentTemp = this.sensor.getRoomTemp();
-			this.avgTemp = (this.avgTemp + this.currentTemp) / 2;
+			
+			// Calculate moving average
+			// http://en.wikipedia.org/wiki/Moving_average
+			int numIter = (int) (this.getRunningTimeLong() / 1000) / this.pollingRate;
+			this.avgTemp = ((this.avgTemp * numIter) + this.currentTemp) / (numIter + 1);
 		}		
 	}
 	
